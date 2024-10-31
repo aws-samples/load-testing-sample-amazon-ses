@@ -1,0 +1,19 @@
+config:
+  target: 'https://xxxxxx.execute-api.aws-region.amazonaws.com/send_messages'
+  phases:
+    - duration: 120
+      arrivalRate: 100
+  processor: "./LoadTestFunction.js"          
+scenarios:
+  - flow:
+    - function: "generateMessages"
+    - post:
+        url: "/events"
+        json:
+          from: "{{ from }}"
+          to: "{{ to }}"
+          template_name: "{{ template_name }}"
+          user_id: "{{ user_id }}"
+          config_set: "{{ config_set }}"
+          tags: "{{ tags }}"
+          unique_code: "{{ unique_code }}"

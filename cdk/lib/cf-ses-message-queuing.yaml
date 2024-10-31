@@ -1,0 +1,547 @@
+# SES message sending queuing
+#
+# **DO NOT DELETE**
+#
+# author: pavlosik@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: SES - Pinpoint messages queuing
+
+Parameters:
+  SQSBatchSize:
+    Type: Number
+    Description: Provide the SQS batch-size
+  ReservedLambdaConcurrency:
+    Type: Number
+    Description: Set the AWS Lambda poller function reserved concurrency
+  DashboardName:
+    Type: String
+    Description: Name for the CloudWatch dashboard
+  ApiGatewayName:
+    Type: String
+    Description: The name of the API Gateway
+
+Resources:
+
+  ##### SQS Queues
+  #######################################
+  MessagesQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 500
+      KmsMasterKeyId: alias/aws/sqs
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt MessagesDeadLetterQueue.Arn
+        maxReceiveCount: 3
+
+  MessagesDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      KmsMasterKeyId: alias/aws/sqs
+
+  SQSQueuePolicy:
+    Type: 'AWS::SQS::QueuePolicy'
+    Properties:
+      Queues:
+        - !Ref MessagesQueue
+        - !Ref MessagesDeadLetterQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: 'EnforceSSLRequestsOnlyOnMessageQueue'
+            Effect: 'Deny'
+            Principal: '*'
+            Action: 'sqs:*'
+            Resource: !GetAtt MessagesQueue.Arn
+            Condition:
+              Bool:
+                'aws:SecureTransport': 'false'
+          - Sid: 'EnforceSSLRequestsOnlyOnMessageDeadLetterQueue'
+            Effect: 'Deny'
+            Principal: '*'
+            Action: 'sqs:*'
+            Resource: !GetAtt MessagesDeadLetterQueue.Arn
+            Condition:
+              Bool:
+                'aws:SecureTransport': 'false'
+
+
+      
+  ##### SES Templates
+  #######################################
+  Template:
+    Type: 'AWS::SES::Template'
+    Properties:
+      Template:
+        TemplateName: "SimpleEmail"
+        SubjectPart: "Hello from SES {{unique_code}}"
+        TextPart: "SES is a high volume inbound and outbound email service."
+        HtmlPart: "<h1>Hello {{first_name}},</h1><p>SES is a high volume inbound and outbound email service</p>"
+
+  ##### Poller Lambda & IAM Role
+  #######################################
+  PollerLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Role: !GetAtt PollerLambdaRole.Arn
+      Timeout: 300
+      MemorySize: 2048
+      Environment:
+        Variables:
+          SQS_QUEUE_URL: !Ref MessagesQueue
+          SQS_DLQ_QUEUE_URL: !Ref MessagesDeadLetterQueue
+          DYNAMODB_TABLENAME: !Select [1, !Split ['/', !GetAtt UserMetadataDynamoDB.Arn]]
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      ReservedConcurrentExecutions: !Ref ReservedLambdaConcurrency
+      Code:
+        ZipFile: |
+          import os
+          import json
+          import boto3
+          import time
+          from botocore.exceptions import ClientError
+          from botocore.config import Config
+          from boto3.dynamodb.conditions import Key
+
+          # Disabling the SDK retries
+          config = Config(
+              retries={
+                  'max_attempts': 0,
+                  'mode': 'standard'
+              }
+          )
+
+          cloudwatch = boto3.client('cloudwatch')
+          sqs_client = boto3.client('sqs')
+          ses_client = boto3.client('sesv2', config=config)
+          sqs_url = os.environ['SQS_QUEUE_URL']
+          sqs_dlq_url = os.environ['SQS_DLQ_QUEUE_URL']
+          dynamodb = boto3.resource('dynamodb')
+          dynamodb_tablename = os.environ['DYNAMODB_TABLENAME']
+          table = dynamodb.Table(dynamodb_tablename)
+
+          def lambda_handler(event, context):
+              for record in event['Records']:
+                  print(record)
+                  json_message = json.loads(record['body'])
+                  try:
+                      start_timer = time.perf_counter()
+                      ses_send_email(json_message)
+                      stop_timer = time.perf_counter()
+                      time_to_send_email = stop_timer - start_timer
+
+                      record_time_to_send = cloudwatch.put_metric_data(
+                          MetricData=[
+                              {
+                                  'MetricName': 'message_sent_ms',
+                                  'Unit': 'Milliseconds',
+                                  'Value': time_to_send_email
+                              },
+                          ],
+                          Namespace='ses_custom_metrics'
+                      )
+                      record_no_messages_processed = cloudwatch.put_metric_data(
+                          MetricData=[
+                              {
+                                  'MetricName': 'no_SQSmessages_processed',
+                                  'Unit': 'Count',
+                                  'Value': 1
+                              },
+                          ],
+                          Namespace='ses_custom_metrics'
+                      )
+                  except Exception as e:
+                      print("ERROR: ", e)
+
+              print("Number of messages processed: " + str(len(event['Records'])))
+
+          def ses_send_email(json_message):
+              # Send the email via SESv2
+              try:
+                  user_metadata = table.query(KeyConditionExpression=Key('user_id').eq(str(json_message['user_id'])))
+                  for user in user_metadata['Items']:
+                      # Get user metadata from DynamoDB that will be used a the SES message template data
+                      template_data = user['metadata']
+
+                  template_data['unique_code'] = json_message['unique_code']  # Adds to the template data the unique code from the request
+
+                  email_send = ses_client.send_email(
+                      FromEmailAddress=json_message['from'],
+                      Destination={'ToAddresses': [json_message['to']]},
+                      ConfigurationSetName=json_message['config_set'],
+                      EmailTags=json_message['tags'],
+                      Content={
+                          'Template': {
+                              'TemplateName': json_message['template_name'],
+                              'TemplateData': json.dumps(template_data)
+                          }
+                      }
+                  )
+
+              except ClientError as e:
+                  print(e.response['Error']['Message'])
+                  error_message = e.response['Error']['Message']
+                  if error_message == "Maximum sending rate exceeded.":
+                      cloudwatch.put_metric_data(
+                          MetricData=[
+                              {
+                                  'MetricName': 'ses_throttling',
+                                  'Unit': 'Count',
+                                  'Value': 1
+                              },
+                          ],
+                          Namespace='ses_custom_metrics'
+                      )
+
+                      write_back_to_sqs = sqs_client.send_message(
+                          QueueUrl=sqs_url,
+                          MessageBody=json.dumps(json_message)
+                      )
+                      print("Message back to the queue: " + str(write_back_to_sqs))
+                  else:
+                      json_message['error_message'] = e.response['Error']['Message']
+                      write_back_to_sqs = sqs_client.send_message(
+                          QueueUrl=sqs_dlq_url,
+                          MessageBody=json.dumps(json_message)
+                      )
+                      print("Unknown error write to DLQ")
+              else:
+                  print("Email sent")
+
+  PollerLambdaEventMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      BatchSize: !Ref SQSBatchSize
+      MaximumBatchingWindowInSeconds: 1
+      Enabled: True
+      EventSourceArn: !GetAtt MessagesQueue.Arn
+      FunctionName: !Ref PollerLambda
+
+  PollerLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        -
+          PolicyName: "root"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Effect: Allow
+                Action:
+                  - "ses:SendEmail"
+                  - "ses:SendBulkEmail"
+                  - "ses:SendTemplatedEmail"
+                Resource: !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:*
+              -
+                Effect: Allow
+                Action:
+                  - "sqs:SendMessage"
+                  - "sqs:ReceiveMessage"
+                  - "sqs:DeleteMessage"
+                  - "sqs:GetQueueAttributes"
+                Resource: !GetAtt MessagesQueue.Arn
+              -
+                Effect: Allow
+                Action:
+                  - "sqs:SendMessage"
+                Resource: !GetAtt MessagesDeadLetterQueue.Arn
+              -
+                Effect: "Allow"
+                Action:
+                  - "dynamodb:Query"
+                Resource: !GetAtt UserMetadataDynamoDB.Arn
+              -
+                Effect: "Allow"
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+              -
+                Effect: "Allow"
+                Action:
+                  - "cloudwatch:PutMetricData"
+                Resource: "*"
+
+  ##### CloudWatch dashboard
+  #######################################
+  SESCloudwatchDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Ref DashboardName
+      DashboardBody: !Sub |
+        {
+            "widgets": [
+                {
+                    "height": 9,
+                    "width": 24,
+                    "y": 0,
+                    "x": 0,
+                    "type": "metric",
+                    "properties": {
+                        "metrics": [
+                            [ "AWS/SES", "Send" ],
+                            [ ".", "Delivery" ],
+                            [ "AWS/Lambda", "Invocations", "FunctionName", "${PollerLambda}", { "label": "Lambda Invocations", "yAxis": "right" } ],
+                            [ "ses_custom_metrics", "no_SQSmessages_processed", { "label": "Lambda No SQS messages processed" } ],
+                            [ ".", "ses_throttling", { "yAxis": "left", "label": "SES_throttling" } ],
+                            [ "AWS/SQS", "NumberOfMessagesSent", "QueueName", "${MessagesQueue.QueueName}", { "label": "SQS number of messages sent" } ]
+                        ],
+                        "view": "timeSeries",
+                        "stacked": false,
+                        "region": "${AWS::Region}",
+                        "stat": "Sum",
+                        "period": 1,
+                        "title": "Email Queuing Monitoring",
+                        "yAxis": {
+                            "right": {
+                                "max": 200
+                            }
+                        }
+                    }
+                },
+                {
+                    "height": 6,
+                    "width": 8,
+                    "y": 9,
+                    "x": 0,
+                    "type": "metric",
+                    "properties": {
+                        "view": "timeSeries",
+                        "stacked": true,
+                        "metrics": [
+                            [ "AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", "${MessagesQueue.QueueName}" ]
+                        ],
+                        "region": "${AWS::Region}",
+                        "period": 10,
+                        "title": "SQS-NumberOfMessagesVisible"
+                    }
+                },
+                {
+                    "height": 6,
+                    "width": 8,
+                    "y": 9,
+                    "x": 8,
+                    "type": "metric",
+                    "properties": {
+                        "metrics": [
+                            [ "ses_custom_metrics", "message_sent_ms" ],
+                            [ "AWS/Lambda", "Duration", "FunctionName", "${PollerLambda}", { "yAxis": "right", "label": "Lambda poller duration" } ]
+                        ],
+                        "view": "timeSeries",
+                        "stacked": false,
+                        "region": "${AWS::Region}",
+                        "stat": "Average",
+                        "period": 10,
+                        "title": "Lambda duration & SES API duration"
+                    }
+                },
+                {
+                    "height": 6,
+                    "width": 8,
+                    "y": 9,
+                    "x": 16,
+                    "type": "metric",
+                    "properties": {
+                        "view": "timeSeries",
+                        "stacked": false,
+                        "metrics": [
+                            [ "AWS/Lambda", "ConcurrentExecutions", "FunctionName", "${PollerLambda}" ],
+                            [ ".", "Errors", ".", ".", { "stat": "Sum", "yAxis": "right" } ]
+                        ],
+                        "region": "${AWS::Region}",
+                        "period": 10,
+                        "title": "Lambda - Poller metrics"
+                    }
+                }
+            ]
+        }
+
+  ##### API Gateway API Key and Usage Plan
+  #######################################
+  ApiGatewayApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    Properties: 
+      Enabled: true
+      Name: "MyApiKey"
+      StageKeys:
+        - RestApiId: !Ref apiGateway
+          StageName: !Ref apiGatewayStage
+
+  ApiGatewayUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    Properties:
+      UsagePlanName: "MyUsagePlan"
+      Description: "Usage plan for SES API"
+      ApiStages:
+        - ApiId: !Ref apiGateway
+          Stage: !Ref apiGatewayStage
+      Throttle:
+        BurstLimit: 200
+        RateLimit: 100
+
+  ApiGatewayUsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties: 
+      KeyId: !Ref ApiGatewayApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref ApiGatewayUsagePlan
+
+  ##### API Gateway Definition
+  #######################################   
+  apiGateway:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Ref ApiGatewayName
+      Body:
+        openapi: 3.0.0
+        components:
+          schemas:
+            Empty:
+              title: "Empty Schema"
+              type: "object"
+        paths:
+          /events:
+            post:
+              operationId: SendEmail
+              summary: Handles send email requests
+              requestBody:
+                content: application/json
+              responses:
+                "200":
+                  description: Event post successfully handled and placed on queue
+                "400":
+                  description: Bad request
+                "500":
+                  description: Server Error
+              x-amazon-apigateway-integration:
+                credentials: !GetAtt APIGatewayRole.Arn
+                httpMethod: "POST"
+                uri: !Sub "arn:aws:apigateway:${AWS::Region}:sqs:path/${AWS::AccountId}/${MessagesQueue.QueueName}"
+                responses:
+                  default:
+                    statusCode: "200"
+                    responseTemplates:
+                      application/json: "Success"
+                requestParameters:
+                  integration.request.header.Content-Type: "'application/x-www-form-urlencoded'"
+                requestTemplates:
+                  application/json: "Action=SendMessage&MessageBody=$input.body"
+                passthroughBehavior: "never"
+                type: "aws"
+              security:
+                - api_key: []
+
+  apiGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - apiGateway
+    Properties:
+      RestApiId: !Ref apiGateway
+
+  apiGatewayStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      StageName: "send_messages"
+      AccessLogSetting:
+        DestinationArn: !GetAtt apiGatewayLogGroup.Arn
+        Format: $context.extendedRequestId $context.identity.sourceIp $context.identity.caller $context.identity.user [$context.requestTime] "$context.httpMethod $context.resourcePath $context.protocol" $context.status $context.responseLength $context.requestId
+      DeploymentId: !Ref apiGatewayDeployment
+      RestApiId: !Ref apiGateway
+
+  apiGatewayLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/apigateway/${ApiGatewayName}
+      RetentionInDays: 90
+
+  apiGwAccountConfig:
+    Type: "AWS::ApiGateway::Account"
+    Properties:
+      CloudWatchRoleArn: !GetAtt "apiGatewayLoggingRole.Arn"
+
+  apiGatewayLoggingRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - "apigateway.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Path: "/"
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"
+
+  APIGatewayRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - apigateway.amazonaws.com
+      Path: /
+      Policies:
+        -
+          PolicyName: "root"
+          PolicyDocument:
+            Statement:
+              - Action: sqs:SendMessage
+                Effect: Allow
+                Resource: !GetAtt 'MessagesQueue.Arn'
+              - Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Effect: Allow
+                Resource: '*'
+
+  ##### DYNAMO DB TABLES
+  ##################################
+  UserMetadataDynamoDB:
+    Type: AWS::DynamoDB::Table
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+
+Outputs:
+  apiGatewayInvokeURL:
+    Value: !Sub https://${apiGateway}.execute-api.${AWS::Region}.amazonaws.com/${apiGatewayStage}/events
+  
+  DynamoDBTableName:
+    Description: The name of the DynamoDB table
+    Value: !Ref UserMetadataDynamoDB
+
+  ApiKeyValue:
+    Description: The API Key for accessing the API Gateway
+    Value: !Ref ApiGatewayApiKey
