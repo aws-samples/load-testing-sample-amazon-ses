@@ -58,7 +58,7 @@ To deploy the solution effectively, the following inputs and configurations are 
 1. **Clone the Repository**
    - Clone the SES load testing solution repository to your local machine:
      ```bash
-     git clone git@ssh.gitlab.aws.dev:cds/ses-load-testing.git
+     git clone git@github.com:aws-samples/load-testing-sample-amazon-ses.git
      ```
 
 2. **Update the CDK Configuration**
