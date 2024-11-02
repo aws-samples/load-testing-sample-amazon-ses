@@ -134,7 +134,7 @@ Once the solution is deployed, you can configure Artillery to perform email load
 
 ### 2. **Analyzing Email Events in Athena**
    - Email sending events are captured and stored in the Amazon Athena database created during the deployment. Navigate to the [Amazon Athena Console](https://console.aws.amazon.com/athena/) and select your Athena database.
-   - You can run queries to analyze event types (e.g., deliveries, bounces, complaints). Use the pre-built queries from the `SQL-queries.md` file for your analysis.
+   - You can run queries to analyze event types (e.g., deliveries, bounces, complaints). Use the pre-built queries from the [SQL-queries.md](https://github.com/aws-samples/load-testing-sample-amazon-ses/blob/main/SQL-queries.md) file for your analysis.
 
    Example query:
    ```sql
