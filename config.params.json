@@ -1,0 +1,9 @@
+{
+  "EventAthenaDatabaseName": "ses-events",
+  "NewConfigurationSet": "Yes",
+  "ConfigurationSetName": "load-test-config",
+  "SQSBatchSize": 20,
+  "ReservedLambdaConcurrency": 3,
+  "CloudWatchDashboardName": "SES-queue-monitoring",
+  "ApiGatewayName": "ses-endpoint-queue"
+}

@@ -13,7 +13,7 @@ export class TestUserDataStack extends cdk.Stack {
     const userGeneratorLambda = new triggers.TriggerFunction(this, "GenerateUsers", {
       runtime: lambda.Runtime.PYTHON_3_12,
       timeout: cdk.Duration.minutes(5),
-      code: lambda.Code.fromAsset("./lambda_code"),
+      code: lambda.Code.fromAsset("lib/lambda_code"),
       handler: "generate_users.lambda_handler",
       memorySize: 2048,
 	  environment: {

@@ -1,37 +1,57 @@
 #!/usr/bin/env node
 import 'source-map-support/register';
 import * as cdk from 'aws-cdk-lib';
-import { DNSStack } from '../lib/dns';
-import { SESInfraStack } from '../lib/ses_infra';
-import { PipelineStack, PipelineStackProps } from '../lib/pipeline';
+import { PipelineStack} from '../lib/pipeline';
 import { AwsSolutionsChecks, NagSuppressions } from 'cdk-nag'
 import { Aspects } from 'aws-cdk-lib';
 import { TestUserDataStack, TestUserStackProps } from '../lib/test_user_data';
 import { SESqueueStack } from '../lib/ses_queuing';
 
 const app = new cdk.App();
-const aws_region = 'us-west-2'
 
-# Amazon SES analytics pipeline CloudFormation
+// Read the parameters from config.params.json
+const configParams = require("../config.params.json");
+
+const eventAthenaDatabaseName = configParams.EventAthenaDatabaseName;
+const newConfigurationSet = configParams.NewConfigurationSet;
+const configurationSetName = configParams.ConfigurationSetName;
+const sqsBatchSize = configParams.SQSBatchSize;
+const reservedLambdaConcurrency = configParams.ReservedLambdaConcurrency;
+const cloudwatchDashboardName = configParams.CloudWatchDashboardName;
+const apiGatewayName = configParams.ApiGatewayName;
+
+// Random S3 bucket name
+function generateRandomBucketName(): string {
+  const characters = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  let result = '';
+  for (let i = 0; i < 6; i++) {
+    const randomIndex = Math.floor(Math.random() * characters.length);
+    result += characters[randomIndex];
+  }
+  return `${result}-ses-load-testing`;
+}
+
+// Amazon SES analytics pipeline CloudFormation
 const pipelineStack = new PipelineStack(app, "PipelineStack", {
-  env: {region: aws_region },
-  EventAthenaDatabaseName: 'ses-events',
-  CreateBucketName: `${app.account}-ses-queuing`,
-  NewConfigurationSet: 'Yes',
-  ConfigurationSetName: 'sesbenchconfsetname'
+  env: {region: process.env.CDK_DEFAULT_REGION },
+  EventAthenaDatabaseName: eventAthenaDatabaseName,
+  CreateBucketName: generateRandomBucketName(),
+  NewConfigurationSet: newConfigurationSet,
+  ConfigurationSetName: configurationSetName
 })
 
-# Amazon SES email queuing CloudFormation
+// Amazon SES email queuing CloudFormation
 const sesQueueStack = new SESqueueStack(app, "SESqueueStack", {
-  env: { region: aws_region },
-  SQSBatchSize: 20,
-  ReservedLambdaConcurrency: 7,
-  DashboardName: 'SES-queue-monitoring',
-  ApiGatewayName: 'ses-endpoint-queue'
+  env: { region: process.env.CDK_DEFAULT_REGION },
+  SQSBatchSize: sqsBatchSize,
+  ReservedLambdaConcurrency: reservedLambdaConcurrency,
+  DashboardName: cloudwatchDashboardName,
+  ApiGatewayName: apiGatewayName
 });
 
+// Test data for Amazon DynamoDB
 const testUserDataStack = new TestUserDataStack(app, "TestUserDataStack", {
-	env: { region: aws_region },
+	env: { region: process.env.CDK_DEFAULT_REGION },
 	DynamoDBTableName: sesQueueStack.DynamoDBTableName
 } as TestUserStackProps);
 
@@ -41,7 +61,6 @@ NagSuppressions.addStackSuppressions(testUserDataStack, [
   { id: 'AwsSolutions-IAM4', reason: 'AWS Managed Policy following Blog Post' },
   { id: 'AwsSolutions-IAM5', reason: 'Allow All Ops' },
 ]);
-
 
 NagSuppressions.addStackSuppressions(sesQueueStack, [
   { id: 'AwsSolutions-IAM4', reason: 'AWS Managed Policy following Blog Post' },

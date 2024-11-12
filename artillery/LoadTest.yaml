@@ -1,7 +1,7 @@
 config:
-  target: 'https://xxxxxx.execute-api.aws-region.amazonaws.com/send_messages'
+  target: 'https://gdu1o8etp4.execute-api.us-east-1.amazonaws.com/send_messages'
   phases:
-    - duration: 120
+    - duration: 60
       arrivalRate: 100
   processor: "./LoadTestFunction.js"          
 scenarios:
@@ -9,6 +9,8 @@ scenarios:
     - function: "generateMessages"
     - post:
         url: "/events"
+        headers:
+            x-api-key: "your-api-key"
         json:
           from: "{{ from }}"
           to: "{{ to }}"

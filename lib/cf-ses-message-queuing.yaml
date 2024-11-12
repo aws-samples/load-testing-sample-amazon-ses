@@ -74,9 +74,9 @@ Resources:
     Properties:
       Template:
         TemplateName: "SimpleEmail"
-        SubjectPart: "Hello from SES {{unique_code}}"
+        SubjectPart: "Hello from Amazon SES {{unique_code}}"
         TextPart: "SES is a high volume inbound and outbound email service."
-        HtmlPart: "<h1>Hello {{first_name}},</h1><p>SES is a high volume inbound and outbound email service</p>"
+        HtmlPart: "<h1>Hello {{first_name}},</h1><p>Amazon SES is a high volume inbound and outbound email service</p>"
 
   ##### Poller Lambda & IAM Role
   #######################################
@@ -535,13 +535,14 @@ Resources:
         SSEEnabled: true
 
 Outputs:
-  apiGatewayInvokeURL:
-    Value: !Sub https://${apiGateway}.execute-api.${AWS::Region}.amazonaws.com/${apiGatewayStage}/events
-  
+
   DynamoDBTableName:
     Description: The name of the DynamoDB table
     Value: !Ref UserMetadataDynamoDB
-
+  
+  apiGatewayInvokeURL:
+    Value: !Sub https://${apiGateway}.execute-api.${AWS::Region}.amazonaws.com/${apiGatewayStage}
+  
   ApiKeyValue:
     Description: The API Key for accessing the API Gateway
     Value: !Ref ApiGatewayApiKey

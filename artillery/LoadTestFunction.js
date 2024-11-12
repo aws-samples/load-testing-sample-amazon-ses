@@ -19,8 +19,8 @@ const generateMessages = (userContext, events, done) => {
   userContext.vars.to = "success@simulator.amazonses.com"
   userContext.vars.template_name = "SimpleEmail"
   userContext.vars.user_id = generateUserId()
-  userContext.vars.config_set = "sesbenchconfsetname"
-  userContext.vars.tags = [{"Name":"campaign","Value":"run12"}]
+  userContext.vars.config_set = "load-test-config"
+  userContext.vars.tags = [{"Name":"campaign","Value":"run1"}]
   userContext.vars.unique_code = generateUniqueCode()
 
   return done()
