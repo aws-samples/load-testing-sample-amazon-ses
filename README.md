@@ -12,25 +12,22 @@ This solution is designed to support Amazon SES (Simple Email Service) users in 
 
 ### Table of Contents
 
-1. [Description](#description)
-2. [Key Features](#key-features)
-3. [Solution Queuing Mechanics](#solution-queuing-mechanics)
-4. [Architecture Overview](#architecture-overview)
-5. [Prerequisites](#prerequisites)
-6. [Deployment Steps](#deployment-steps)
+1. [Solution Queuing Mechanics](#solution-queuing-mechanics)
+2. [Architecture Overview](#architecture-overview)
+3. [Prerequisites](#prerequisites)
+4. [Deployment Steps](#deployment-steps)
    1. [Clone the Repository](#clone-the-repository)
    2. [Bootstrap AWS Environment](#bootstrap-aws-environment)
    3. [Deploy the CDK Stacks](#deploy-the-cdk-stacks)
    4. [Retrieve the API Gateway Endpoint](#retrieve-the-api-gateway-endpoint)
    5. [Retrieve the API Key](#retrieve-the-api-key)
-7. [Configuring Artillery for Load Testing](#configuring-artillery-for-load-testing)
+5. [Configuring Artillery for Load Testing](#configuring-artillery-for-load-testing)
    1. [Update LoadTest.yaml](#update-loadtestyaml)
    2. [Edit LoadTestFunction.js](#edit-loadtestfunctionjs)
    3. [Run the Load Test](#run-the-load-test)
-8. [Monitoring and Analyzing Performance](#monitoring-and-analyzing-performance)
+6. [Monitoring and Analyzing Performance](#monitoring-and-analyzing-performance)
    1. [CloudWatch Monitoring](#cloudwatch-monitoring)
    2. [Analyzing Email Events in Athena](#analyzing-email-events-in-athena)
-
 
 ### Solution queuing mechanics
 
