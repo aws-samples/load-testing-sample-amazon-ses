@@ -1,6 +1,6 @@
 ### SES Load Testing Solution
 
-## Description
+### Description
 
 This solution is designed to support Amazon SES (Simple Email Service) users in queuing and sending bulk emails while maintaining control over error handling, personalization, and throughput testing. It enables email performance monitoring by capturing and analyzing event data through Amazon Athena and CloudWatch. The solution deploys key AWS services using the AWS Cloud Development Kit (CDK).
 
@@ -9,6 +9,28 @@ This solution is designed to support Amazon SES (Simple Email Service) users in 
 - **Personalize Emails**: Dynamically generate emails using customer metadata stored in DynamoDB.
 - **Throughput Testing**: Simulate different levels of email traffic to assess performance.
 - **Analytics & Monitoring**: Capture email events and analyze them using Amazon Athena and monitor metrics in CloudWatch.
+
+### Table of Contents
+
+1. [Description](#description)
+2. [Key Features](#key-features)
+3. [Solution Queuing Mechanics](#solution-queuing-mechanics)
+4. [Architecture Overview](#architecture-overview)
+5. [Prerequisites](#prerequisites)
+6. [Deployment Steps](#deployment-steps)
+   1. [Clone the Repository](#clone-the-repository)
+   2. [Bootstrap AWS Environment](#bootstrap-aws-environment)
+   3. [Deploy the CDK Stacks](#deploy-the-cdk-stacks)
+   4. [Retrieve the API Gateway Endpoint](#retrieve-the-api-gateway-endpoint)
+   5. [Retrieve the API Key](#retrieve-the-api-key)
+7. [Configuring Artillery for Load Testing](#configuring-artillery-for-load-testing)
+   1. [Update LoadTest.yaml](#update-loadtestyaml)
+   2. [Edit LoadTestFunction.js](#edit-loadtestfunctionjs)
+   3. [Run the Load Test](#run-the-load-test)
+8. [Monitoring and Analyzing Performance](#monitoring-and-analyzing-performance)
+   1. [CloudWatch Monitoring](#cloudwatch-monitoring)
+   2. [Analyzing Email Events in Athena](#analyzing-email-events-in-athena)
+
 
 ### Solution queuing mechanics
 
@@ -40,7 +62,7 @@ The solution includes a CloudWatch dashboard that provides visibility into vario
 
 ![Architecture Diagram](assets/architecture-diagram.PNG)
 
-## Prerequisites
+### Prerequisites
 
 1. **Verified SES Domain**: Make sure your domain is verified within SES. For guidance, visit the [Amazon SES identity creation guide](https://docs.aws.amazon.com/ses/latest/dg/creating-identities.html).
 2. **SES in Production Mode**: It's recommended to use this solution for throughputs higher than 20 emails per second. Request production access in SES by following this [SES production access guide](https://docs.aws.amazon.com/ses/latest/dg/request-production-access.html).
@@ -105,7 +127,7 @@ To deploy the solution, use the command below to deploy all three CDK stacks:
      ```bash
      cdk deploy PipelineStack sesQueueStack TestUserDataStack
      ```
-     
+
 6. **Retrieve the API Gateway Endpoint**
    - After deployment, retrieve the `SESqueueStack.apiGatewayInvokeURL` output, which is the API endpoint for sending messages to SQS via API Gateway.
    - Example URL format: `https://xxxxxx.execute-api.aws-region.amazonaws.com/send_messages/`
@@ -196,7 +218,7 @@ After running the load test, go to your CloudWatch dashboard to monitor the perf
 
 ### 2. **Analyzing Email Events in Athena**
    - Email sending events are captured and stored in the Amazon Athena database created during the deployment. Navigate to the [Amazon Athena Console](https://console.aws.amazon.com/athena/) and select your Athena database.
-   - You can run queries to analyze event types (e.g., deliveries, bounces, complaints). Use the pre-built queries from the [SQL-queries.md](https://github.com/aws-samples/load-testing-sample-amazon-ses/blob/main/SQL-queries.md) file for your analysis.
+   - You can run queries to analyze event types (e.g., deliveries, bounces, complaints). Use the pre-built queries from the [SQL-queries.md](assets/SQL-queries.md) file for your analysis.
 
    Example query:
    ```sql
