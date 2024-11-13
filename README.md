@@ -43,9 +43,17 @@ If the SES API returns a throttling error, the Lambda poller requeues the messag
 1. **Artillery**: This solution uses [Artillery](https://www.artillery.io/) to simulate email traffic. Artillery is a scalable, flexible, and easy-to-use platform that provides everything needed for production-grade load testing.
 2. **Amazon API Gateway**: Provides a secure endpoint for applications to send emails. The solution secures the API Gateway endpoint using API Key protection.
 3. **Amazon SQS**: A standard queue is used to manage the queuing of emails. The batch size can be configured either during or after deployment.
-4. **AWS Lambda**: An AWS Lambda function processes messages from the SQS queue, queries Amazon DynamoDB for customer data, and sends emails via Amazon SES. If a throttling error is returned by the SES API, the message is re-queued. Any other errors result in the message being sent to a Dead Letter Queue (DLQ).
+4. **AWS Lambda**: An AWS Lambda function processes messages from the SQS queue, queries DynamoDB for customer data, and sends emails via SES. If a throttling error is returned by the SES API, the message is re-queued. Any other errors result in the message being sent to a Dead Letter Queue (DLQ).
 5. **Amazon DynamoDB**: Used to store customer data, such as first names, for message personalization. The solution includes demo data stored in a DynamoDB table for testing purposes.
-6. **Amazon SES**: The solution creates an SES email template named `SimpleEmail`, featuring placeholders for dynamic values like `first_name`, which is retrieved from DynamoDB based on the user ID, for personalization. It also includes a functional parameter called `unique_code`. This unique_code is generated when Artillery creates the message payload and is later used in Athena queries to ensure each message is delivered no more than once. The solution also creates an SES configuration set for event tracking purposes.
+6. **Amazon SES**: The solution creates an SES email template named `SimpleEmail`, featuring a placeholder in the email body for the recipient's `first_name`, which is personalized by retrieving it from DynamoDB using the user ID. Additionally, the subject line includes a functional parameter called `unique_code`. This code is generated when Artillery creates the message payload and is included in the email subject. It is later used in Athena queries to ensure each message is delivered only once, as it is returned as part of the email engagement events. The solution also sets up an SES configuration set for tracking these events.
+
+**Email template:**
+``` YAML
+TemplateName: "SimpleEmail"
+SubjectPart: "Hello from Amazon SES {{unique_code}}"
+HtmlPart: "<h1>Hello {{first_name}},</h1><p>Amazon SES is a high volume inbound and outbound email service</p>"
+```
+
 7. **Analytics' Pipeline**: Composed of Amazon Kinesis Data Firehose, which serves as one of the SES event destinations for capturing email engagement events, Amazon S3 for storing these events, and Amazon Athena for running SQL queries against the stored email engagement data.
 
 ![Architecture Diagram](assets/architecture-diagram.PNG)
