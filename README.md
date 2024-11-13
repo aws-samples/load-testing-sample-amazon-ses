@@ -2,13 +2,13 @@
 
 ### Description
 
-This solution is designed to support Amazon SES (Simple Email Service) users in queuing and sending bulk emails while maintaining control over error handling, personalization, and throughput testing. It enables email performance monitoring by capturing and analyzing event data through Amazon Athena and CloudWatch. The solution deploys key AWS services using the AWS Cloud Development Kit (CDK).
+This solution is designed to support Amazon Simple Email Service (SES) users in queuing and sending bulk emails while maintaining control over error handling, personalization, and throughput testing. It enables email performance monitoring by capturing and analyzing event data through Amazon Athena and CloudWatch. The solution deploys key AWS services using the AWS Cloud Development Kit (CDK).
 
 ### Key Features:
-- **Queue Emails & Handle Errors**: Efficiently queue large numbers of emails and manage failures.
-- **Personalize Emails**: Dynamically generate emails using customer metadata stored in DynamoDB.
+- **Queue Emails & Handle Errors**: Efficiently queue large numbers of emails and manage failures using [Amazon SQS](https://aws.amazon.com/sqs/) and [AWS Lambda](https://aws.amazon.com/lambda/).
+- **Personalize Emails**: Dynamically generate emails using customer metadata stored in [Amazon DynamoDB](https://aws.amazon.com/dynamodb/).
 - **Throughput Testing**: Simulate different levels of email traffic to assess performance using [SES simulator](https://docs.aws.amazon.com/ses/latest/dg/send-an-email-from-console.html).
-- **Analytics & Monitoring**: Capture email events and analyze them using Amazon Athena and monitor metrics in CloudWatch.
+- **Analytics & Monitoring**: Capture email events and analyze them using [Amazon Athena](https://aws.amazon.com/athena/) and monitor metrics in [Amazon CloudWatch](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Dashboards.html).
 
 ## Table of Contents
 
@@ -16,18 +16,9 @@ This solution is designed to support Amazon SES (Simple Email Service) users in 
 2. [Architecture Overview](#architecture-overview)
 3. [Prerequisites](#prerequisites)
 4. [Deployment Steps](#deployment-steps)
-   1. [Clone the Repository](#clone-the-repository)
-   2. [Bootstrap AWS Environment](#bootstrap-aws-environment)
-   3. [Deploy the CDK Stacks](#deploy-the-cdk-stacks)
-   4. [Retrieve the API Gateway Endpoint](#retrieve-the-api-gateway-endpoint)
-   5. [Retrieve the API Key](#retrieve-the-api-key)
 5. [Configuring Artillery for Load Testing](#configuring-artillery-for-load-testing)
-   1. [Update LoadTest.yaml](#update-loadtestyaml)
-   2. [Edit LoadTestFunction.js](#edit-loadtestfunctionjs)
-   3. [Run the Load Test](#run-the-load-test)
 6. [Monitoring and Analyzing Performance](#monitoring-and-analyzing-performance)
-   1. [CloudWatch Monitoring](#cloudwatch-monitoring)
-   2. [Analyzing Email Events in Athena](#analyzing-email-events-in-athena)
+7. [Clean-up](#clean-up)
 
 ## Solution queuing mechanics
 
@@ -41,11 +32,9 @@ To achieve higher throughput, such as 40 emails per second, you will need to run
 
 **IMPORTANT:** AWS Lambda concurrency does not have a simple linear relationship with the number of messages processed. For instance, a Lambda concurrency of 4 with an SQS batch size of 20 won’t necessarily result in 80 transactions per second (TPS) due to the integration mechanics between Lambda and SQS. In practice, achieving your desired processing rate often requires higher concurrency. For example, to have 4 Lambdas processing SQS messages concurrently, you may need to set the Lambda concurrency to 7.
 
-This solution includes a CloudWatch dashboard that provides insights into various metrics. You can use this dashboard to fine-tune Lambda concurrency and SQS batch size as necessary.
+This solution includes a CloudWatch dashboard that offers insights into various metrics, enabling you to fine-tune Lambda concurrency and SQS batch size as needed to achieve the desired throughput while staying within your SES account limits.
 
 If the SES API returns a throttling error, the Lambda poller requeues the message in the SQS Standard Queue. For other errors, the message is sent to a Dead Letter Queue (DLQ), which is included in the deployment.
-
-The solution offers flexibility to configure the SQS batch size and Lambda concurrency during deployment, allowing you to achieve the desired throughput while adhering to your SES account limits. It also deploys a CloudWatch dashboard to monitor metrics, such as average Lambda processing time, which can help you optimize SQS batch size and Lambda concurrency settings.
 
 ![Queuing-mechanism](assets/queuing-mechanism.PNG)
 
@@ -80,6 +69,13 @@ The solution offers flexibility to configure the SQS batch size and Lambda concu
 
 ## Deployment Steps
 
+1. **Clone the Repository**
+   - Clone the SES load testing solution repository to your local machine:
+     ```bash
+     git clone git@github.com:aws-samples/load-testing-sample-amazon-ses.git
+     ```
+2. **Edit the config.params.json**
+
 To deploy the solution effectively, the following inputs and configurations are required across the CDK stacks. Open the [config.params.json](config.params.json) file, which should contain the below
 
 ``` JSON
@@ -101,20 +97,13 @@ To deploy the solution effectively, the following inputs and configurations are 
 - **DashboardName**: Leave the default value or define a custom name for the CloudWatch dashboard that will display SES metrics.
 - **ApiGatewayName**: Leave the default value or define a custom name for the API Gateway that will be used to send email data to. 
 
-
-1. **Clone the Repository**
-   - Clone the SES load testing solution repository to your local machine:
-     ```bash
-     git clone git@github.com:aws-samples/load-testing-sample-amazon-ses.git
-     ```
-
-2. **Bootstrap AWS Environment**
+3. **Bootstrap AWS Environment**
    - If this is your first time deploying a CDK project in your AWS account/region, bootstrap the environment:
      ```bash
      cdk bootstrap
      `````
 
-3. **Deploy the CDK Stacks**
+4. **Deploy the CDK Stacks**
 The solution is composed of three CDK stacks:
 
 - **`sesQueueStack`**: Deploys all necessary resources for message queuing, including API Gateway, SQS, Lambda, and DynamoDB.
@@ -127,11 +116,11 @@ To deploy the solution, navigate to the repository folder in your computer and u
 cdk deploy PipelineStack sesQueueStack TestUserDataStack
 ```
 
-6. **Retrieve the API Gateway Endpoint**
+5. **Retrieve the API Gateway Endpoint**
    - After deployment, retrieve the `SESqueueStack.apiGatewayInvokeURL` output, which is the API endpoint for sending messages to SQS via API Gateway.
    - Example URL format: `https://xxxxxx.execute-api.aws-region.amazonaws.com/send_messages/`
 
-7. **Retrieve the API Key**
+6. **Retrieve the API Key**
    - After deployment, retrieve the `SESqueueStack.ApiKeyValue` output, which is the API key for accessing the API Gateway. You can update the API key by following the instructions in [this page](https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-setup-api-key-with-console.html).
 
 ## Configuring Artillery for Load Testing
